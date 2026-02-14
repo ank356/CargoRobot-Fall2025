@@ -1,0 +1,131 @@
+import basehat
+import time
+from buildhat import Motor
+from basehat import IMUSensor
+from basehat import Button
+
+print("Starting engines...")
+
+ultrasonicPin = 22
+buttonPin = 26
+lineFinderLeft = 18
+lineFinderRight = 16
+
+ultra = basehat.UltrasonicSensor(ultrasonicPin)
+lineLeft = basehat.LineFinder(lineFinderLeft)
+lineRight = basehat.LineFinder(lineFinderRight)
+button = Button(buttonPin)
+imu = IMUSensor() 
+
+motorLeft = Motor('B')
+motorRight = Motor('A') 
+motorCargo = Motor('C') 
+
+# Left Motor (B): Negative PWM is forward, positive PWM is backward
+# Right Motor (A): Positive PWM is forward, negative PWM is backward
+
+baseSpeed = 0.8 #Base speed for straight movement (80%)
+turnSpeedF = 0.7 #Speed for the forward-driving wheel during a turn (70%) 
+turnSpeedB = 0.4 #Speed for the backward-driving wheel during a turn (40%)
+
+threshold = 2000 #Threshold in z-direction for magnet (microteslas)
+distance = 6 #Obstacle stop distance (cm)
+
+baseX, baseY, baseZ = imu.getMag()
+
+mission = 1      
+isRunning = False 
+magCount = 0   
+
+def stop_motors():  
+    motorLeft.stop()
+    motorRight.stop()
+    motorCargo.stop()
+
+def drop_cargo():
+    print("Target magnet detected, dropping cargo")
+    stop_motors()
+    time.sleep(0.5)
+    motorCargo.run_for_degrees(6000, speed=50)
+    time.sleep(0.5)
+    motorLeft.pwm(-baseSpeed) 
+    motorRight.pwm(baseSpeed)
+    time.sleep(0.5)
+    stop_motors()
+    motorCargo.run_for_degrees(-6000, speed=50)
+    print("Cargo dropped")
+
+def special_right_turn():
+    print("Performing special right turn")
+    motorLeft.pwm(-turnSpeedF)
+    motorRight.pwm(-turnSpeedB)
+    time.sleep(1.5)
+    motorLeft.pwm(-baseSpeed)
+    motorRight.pwm(baseSpeed)
+    time.sleep(0.3)
+
+print(f"Ready for Mission {mission}. Press button to start.")
+
+try:
+    while True:
+        if button.value == 1:
+            if isRunning:
+                print("Stopping, next mission will be Mission", mission + 1)
+                isRunning = False
+                stop_motors()
+                mission += 1
+            else:
+                print(f"Starting Mission {mission}")
+                magnetCount = 0
+                isRunning = True
+            time.sleep(1) #Delay so button doesn't trigger twice
+
+        if isRunning:
+            distNow = ultra.getDist
+            if (distNow is not None) and (distNow < distance):
+                print("Obstacle detected, stopping")
+                stop_motors()
+                time.sleep(1)
+                continue #Restart detection
+            x, y, z = imu.getMag()
+            if abs(z - baseZ) > threshold:
+                print("Magnet detected")
+                magCount += 1
+                if mission == 1 and magCount == 1:
+                    drop_cargo()
+                elif mission == 2:
+                    if magCount == 1:
+                        special_right_turn()
+                    if magCount == 2:
+                        drop_cargo()
+                elif mission == 3:
+                    if magCount == 2:
+                        special_right_turn()
+                    if magCount == 3:
+                        drop_cargo()
+            if (lineLeft.value == 0 and lineRight.value == 0) or (lineLeft.value == 1 and lineRight.value == 1):
+                print("Going straight")
+                motorLeft.pwm(-baseSpeed) 
+                motorRight.pwm(baseSpeed)
+            elif lineLeft.value == 1 and lineRight.value == 0:
+                print("Line detected, turning left")
+                time.sleep(0.5)
+                motorLeft.pwm(turnSpeedB)      
+                motorRight.pwm(turnSpeedF)
+                time.sleep(0.25)
+            elif lineLeft.value == 0 and lineRight.value == 1:
+                print("Line detected, turning right")
+                time.sleep(0.5)
+                motorLeft.pwm(-turnSpeedF)      
+                motorRight.pwm(-turnSpeedB)
+                time.sleep(0.25)
+                
+        time.sleep(0.01)
+    
+except KeyboardInterrupt:
+    print("\nCtrl+C detected. Exiting...")
+    stop_motors()
+    
+finally:
+    print("Stopped motors")
+    stop_motors()
